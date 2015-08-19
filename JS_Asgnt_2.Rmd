@@ -1,0 +1,255 @@
+---
+title: "JS_Asgnt2"
+output: word_document
+---
+
+##Question 2 - Author Attribution
+
+### Importing all the necessary libraries
+
+```{r,  results="hide"}
+library(tm)
+library(randomForest)
+library(e1071)
+library(rpart)
+library(ggplot2)
+library(caret)
+```
+
+
+### Defining a Reader plain function that wraps around the ReadPlain function and reads in the data
+
+```{r}
+readerPlain = function(fname){
+  readPlain(elem=list(content=readLines(fname)), id=fname, language='en') }
+```
+
+###Creating the Training Corpus
+* Creating a file list for all 2500 docs being imported and assigning author names to each one of them
+
+```{r}
+author_dirs_train = Sys.glob('C:/Users/Suraj/Desktop/James Scott/STA380-master/data/ReutersC50/C50train/*')
+
+file_list_train = NULL
+train_labels = NULL
+
+for(author in author_dirs_train) {
+  author_name = substring(author, first=75)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list_train = append(file_list_train, files_to_add)
+  train_labels = append(train_labels, rep(author_name, length(files_to_add)))
+}
+
+```
+
+###Applying the ReaderPlain function for all the documents so that they will be read/imported in a certain manner
+
+
+```{r}
+all_docs_train = lapply(file_list_train, readerPlain) 
+names(all_docs_train) = file_list_train
+names(all_docs_train) = sub('.txt', '', names(all_docs_train))
+```
+
+###Creating a Corpus from the 'list' which has all the text from all the 'C50train' documents 
+
+```{r}
+train_corpus = Corpus(VectorSource(all_docs_train))
+names(train_corpus) = file_list_train
+
+```
+
+###Performing certain pre-processing steps on the Training Corpus like:
+* Removing numbers, punctuation(no emoticons here), whitespaces 
+* Convert to lower case
+* Remove certain words, specified here under the 'SMART' kind of stopwords
+
+```{r}
+train_corpus = tm_map(train_corpus, content_transformer(removeNumbers)) 
+train_corpus = tm_map(train_corpus, content_transformer(removePunctuation))
+train_corpus = tm_map(train_corpus, content_transformer(tolower)) 
+train_corpus = tm_map(train_corpus, content_transformer(stripWhitespace)) 
+train_corpus = tm_map(train_corpus, content_transformer(removeWords), stopwords("SMART"))
+```
+
+###Creating a Document Term Matrix, where each row represents a document and each column represents a unique word from the entire corpus. The entries in this matrix are the counts for each of the words
+
+```{r}
+DTM_train = DocumentTermMatrix(train_corpus)
+DTM_train = removeSparseTerms(DTM_train, 0.96)
+```
+*************************************************************************
+###Creating the Testing corpus
+* Creating a file list for all 2500 docs being imported and assigning author names to each one of them
+
+```{r}
+author_dirs_test = Sys.glob('C:/Users/Suraj/Desktop/James Scott/STA380-master/data/ReutersC50/C50test/*')
+file_list_test = NULL
+test_labels = NULL
+for(author in author_dirs_test) {
+  author_name = substring(author, first=74)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  file_list_test = append(file_list_test, files_to_add)
+  test_labels = append(test_labels, rep(author_name, length(files_to_add)))
+}
+```
+
+
+###Applying the ReaderPlain function for all the documents so that they will be read/imported in a certain manner
+
+```{r}
+all_docs_test = lapply(file_list_test, readerPlain) 
+names(all_docs_test) = file_list_test
+names(all_docs_test) = sub('.txt', '', names(all_docs_test))
+```
+
+###Creating a Corpus from the 'list' which has all the text from all the 'C50test' documents 
+
+```{r}
+test_corpus = Corpus(VectorSource(all_docs_test))
+names(test_corpus) = file_list_test
+```
+
+###Performing certain pre-processing steps on the Training Corpus like:
+* Removing numbers, punctuation(no emoticons here), whitespaces 
+* Convert to lower case
+* Remove certain words, specified here under the 'SMART' kind of stopwords
+
+```{r}
+test_corpus = tm_map(test_corpus, content_transformer(removeNumbers)) 
+test_corpus = tm_map(test_corpus, content_transformer(removePunctuation))
+test_corpus = tm_map(test_corpus, content_transformer(tolower)) 
+test_corpus = tm_map(test_corpus, content_transformer(stripWhitespace)) 
+test_corpus = tm_map(test_corpus, content_transformer(removeWords), stopwords("SMART"))
+
+```
+
+###Standardizing the words in Test and Training dataset so that the test and train matrices match
+* Creating a dictionary of words based on the training corpus
+* Extracting these words from the test corpus
+
+```{r}
+dict_train_words = NULL
+dict_train_words = dimnames(DTM_train)[[2]]
+```
+
+###Creating the testing DTM using words from the training dictionary only
+
+```{r}
+DTM_test = DocumentTermMatrix(test_corpus, list(dictionary=dict_train_words))
+DTM_test = removeSparseTerms(DTM_test, 0.96)
+```
+
+###Converting DTMs to data frames
+* Document Term matrices in their form do not work well for application of classifier models. Hence, will convert them to data frames
+* The dataset is now in a format that can be used for classification models
+
+```{r, results="hide" }
+DTM_train_df = as.data.frame(inspect(DTM_train))
+DTM_test_df = as.data.frame(inspect(DTM_test))
+```
+
+*************************************************************************
+##Naive Bayes model
+* Running the Naive Bayes model to predict the authors of the docs in the Test dataset
+* The naiveBayes function accounts for words not seen in training dataset through Laplace smoothing. (laplace = 1)
+
+```{r}
+NB_Model = naiveBayes(x=DTM_train_df, y=as.factor(train_labels), laplace=1)
+NB_prediction = predict(NB_Model, DTM_test_df)
+```
+
+* Creating a confusion matrix to calculate the accuracy of the model in predicting the authors
+* Sensitivity column gives the accuracy % of predicting the documents under each of the authors correctly
+* I have defined the accuracy of the model as the average of the accuracy measures for all the authors
+
+```{r}
+#show output
+CM_NB = confusionMatrix(table(NB_prediction,test_labels))
+CM_NB_df = as.data.frame(CM_NB$byClass)
+CM_NB_df[order(-CM_NB_df$Sensitivity),][1]
+
+Accuracy = mean(CM_NB_df$Sensitivity)
+```
+
+* Conclusion : The model has worked really well for a few authors like LydiaZajc, JimGilchrist and AlanCrosby. But for the majority of authors it hasn't been able to predict well. The accuracy % is low at around 25%.  
+
+***************************************************************************
+
+
+
+
+
+
+***************************************************************************
+##Question 2 - Association Rule Mining
+###Import the necessary libraries
+```{r}
+library(arules)
+```
+
+###Importing dataset using 'read.transactions'. This function let's you import the dataset in the format which 'arules' can use
+
+```{r}
+groceries = read.transactions('https://raw.githubusercontent.com/jgscott/STA380/master/data/groceries.txt', format = 'basket', sep = ',', rm.duplicates = FALSE)
+```
+
+###Running the apriori algorithm on the dataset to generate association rules.
+* Initially running 'apriori' with random values for the 'Support' and 'Confidence' parameters and checking the rules generated
+
+```{r}
+groc_rules <- apriori(groceries, parameter=list(support=.01, confidence=.5, maxlen=6))
+
+```
+
+* The 15 rules generated here are the set of all possible association rules which have a support and confidence greater than the thresholds provided
+
+```{r}
+#show output
+inspect(groc_rules)
+```
+
+###Creating subsets of these association rules by altering the 'support', 'confidence' and 'lift' parameters and observing which association rules are filtered out
+
+* 'Lift' is the increase in probability of the "consequent" itemset given the "if" (antecedent) itemset.
+* Hence, higher the Lift, stronger is the association between the two itemsets in the association rule 
+* To filter out only the strong association rules we can subset for those rules which have high Lift
+* In this example, no rules have a lift greater than 3.
+
+```{r}
+#show output
+inspect(subset(groc_rules, subset=lift > 3))
+```
+
+* We could get rules with a Lift greater than 3 but for that we will have to either reduce the minimum 'Support' thresholds.
+* This would give us rules where the association is stronger but, because 'Support' is low for them, the count of itemsets that show up in these rules are too low to be considered significant from a sales perspective.
+* Similarly, getting high values of lift when 'Confidence' is low does not help, because this happens only when 'Expected Confidence' is also low. Such itemsets with low 'Expected Confidence' and the resultant association rule may not be considered significant from a sales perspective.
+* For a fixed value of 'Support', decreasing the 'Confidence' does not give us higher Lift because Confidence and Lift are related to each other.  
+**The highest values for 'Support' and 'Confidence' below which none of the rules show up are given below**
+
+```{r}
+inspect(subset(groc_rules, subset=lift > 3))
+inspect(subset(groc_rules, subset=confidence > 0.58))
+inspect(subset(groc_rules, subset=support > .011 & confidence > 0.58))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
